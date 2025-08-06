@@ -5,6 +5,7 @@
         target_os = "android",
         target_os = "freebsd",
         target_os = "ios",
+        target_os = "visionos",
         target_os = "linux",
         target_os = "macos",
         target_os = "tvos",
@@ -30,6 +31,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
         target_os = "android",
         target_os = "freebsd",
         target_os = "ios",
+        target_os = "visionos",
         target_os = "linux",
         target_os = "macos",
         target_os = "tvos",
@@ -76,9 +78,15 @@ fn domain_fmt_debug() {
         (Domain::IPV4, "AF_INET"),
         (Domain::IPV6, "AF_INET6"),
         (Domain::UNIX, "AF_UNIX"),
-        #[cfg(all(feature = "all", any(target_os = "fuchsia", target_os = "linux", target_os = "wasi")))]
+        #[cfg(all(
+            feature = "all",
+            any(target_os = "fuchsia", target_os = "linux", target_os = "wasi")
+        ))]
         (Domain::PACKET, "AF_PACKET"),
-        #[cfg(all(feature = "all", any(target_os = "android", target_os = "linux", target_os = "wasi")))]
+        #[cfg(all(
+            feature = "all",
+            any(target_os = "android", target_os = "linux", target_os = "wasi")
+        ))]
         (Domain::VSOCK, "AF_VSOCK"),
         (0.into(), "AF_UNSPEC"),
         (500.into(), "500"),
@@ -140,7 +148,7 @@ fn protocol_fmt_debug() {
 }
 
 #[test]
-#[should_panic = "tried to create a `Socket` with an invalid fd"]
+#[should_panic]
 #[cfg(unix)]
 fn from_invalid_raw_fd_should_panic() {
     use std::os::unix::io::FromRawFd;
@@ -186,7 +194,15 @@ fn socket_address_unix_unnamed() {
 }
 
 #[test]
-#[cfg(all(any(target_os = "linux", target_os = "android", target_os = "wasi"), feature = "all"))]
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "cygwin",
+        target_os = "wasi"
+    ),
+    feature = "all",
+))]
 fn socket_address_unix_abstract_namespace() {
     let path = "\0h".repeat(108 / 2);
     let addr = SockAddr::unix(&path).unwrap();
@@ -202,7 +218,10 @@ fn socket_address_unix_abstract_namespace() {
 }
 
 #[test]
-#[cfg(all(feature = "all", any(target_os = "android", target_os = "linux", target_os = "wasi")))]
+#[cfg(all(
+    feature = "all",
+    any(target_os = "android", target_os = "linux", target_os = "wasi")
+))]
 fn socket_address_vsock() {
     let addr = SockAddr::vsock(1, 9999);
     assert!(addr.as_socket_ipv4().is_none());
@@ -227,6 +246,7 @@ fn assert_common_flags(socket: &Socket, expected: bool) {
     assert_close_on_exec(socket, expected);
     #[cfg(any(
         target_os = "ios",
+        target_os = "visionos",
         target_os = "macos",
         target_os = "tvos",
         target_os = "watchos",
@@ -351,6 +371,7 @@ fn set_cloexec() {
         target_os = "dragonfly",
         target_os = "freebsd",
         target_os = "fuchsia",
+        target_os = "hurd",
         target_os = "linux",
         target_os = "wasi",
         target_os = "netbsd",
@@ -419,6 +440,7 @@ where
     feature = "all",
     any(
         target_os = "ios",
+        target_os = "visionos",
         target_os = "macos",
         target_os = "tvos",
         target_os = "watchos",
@@ -439,6 +461,7 @@ fn set_nosigpipe() {
 /// Assert that `SO_NOSIGPIPE` is set on `socket`.
 #[cfg(any(
     target_os = "ios",
+    target_os = "visionos",
     target_os = "macos",
     target_os = "tvos",
     target_os = "watchos",
@@ -478,7 +501,7 @@ fn connect_timeout_unrouteable() {
     match socket.connect_timeout(&addr, Duration::from_millis(250)) {
         Ok(_) => panic!("unexpected success"),
         Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {}
-        Err(err) => panic!("unexpected error {}", err),
+        Err(err) => panic!("unexpected error {err}"),
     }
 }
 
@@ -498,7 +521,7 @@ fn connect_timeout_unbound() {
         Err(ref err)
             if err.kind() == io::ErrorKind::ConnectionRefused
                 || err.kind() == io::ErrorKind::TimedOut => {}
-        Err(err) => panic!("unexpected error {}", err),
+        Err(err) => panic!("unexpected error {err}"),
     }
 }
 
@@ -566,10 +589,14 @@ fn unix() {
     let addr = SockAddr::unix(path).unwrap();
 
     let listener = Socket::new(Domain::UNIX, Type::STREAM, None).unwrap();
+    #[cfg(target_os = "cygwin")]
+    listener.set_no_peercred().unwrap();
     listener.bind(&addr).unwrap();
     listener.listen(10).unwrap();
 
     let mut a = Socket::new(Domain::UNIX, Type::STREAM, None).unwrap();
+    #[cfg(target_os = "cygwin")]
+    a.set_no_peercred().unwrap();
     a.connect(&addr).unwrap();
     let mut b = listener.accept().unwrap().0;
 
@@ -581,7 +608,10 @@ fn unix() {
 }
 
 #[test]
-#[cfg(all(feature = "all", any(target_os = "android", target_os = "linux", target_os = "wasi")))]
+#[cfg(all(
+    feature = "all",
+    any(target_os = "android", target_os = "linux", target_os = "wasi")
+))]
 #[ignore = "using VSOCK family requires optional kernel support (works when enabled)"]
 fn vsock() {
     let addr = SockAddr::vsock(libc::VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY);
@@ -734,6 +764,10 @@ fn send_from_recv_to_vectored() {
     #[cfg(all(unix, not(target_os = "redox")))]
     assert_eq!(flags.is_out_of_band(), false);
     assert_eq!(flags.is_truncated(), false);
+    #[cfg(all(feature = "all", any(target_os = "android", target_os = "linux")))]
+    assert_eq!(flags.is_confirm(), false);
+    #[cfg(all(feature = "all", any(target_os = "android", target_os = "linux")))]
+    assert_eq!(flags.is_dontroute(), false);
     assert_eq!(
         addr.as_socket_ipv6().unwrap(),
         addr_a.as_socket_ipv6().unwrap()
@@ -863,6 +897,7 @@ fn tcp_keepalive() {
             target_os = "freebsd",
             target_os = "fuchsia",
             target_os = "ios",
+            target_os = "visionos",
             target_os = "linux",
             target_os = "macos",
             target_os = "wasi",
@@ -881,12 +916,14 @@ fn tcp_keepalive() {
             target_os = "freebsd",
             target_os = "fuchsia",
             target_os = "ios",
+            target_os = "visionos",
             target_os = "linux",
             target_os = "macos",
             target_os = "wasi",
             target_os = "netbsd",
             target_os = "tvos",
             target_os = "watchos",
+            target_os = "windows"
         )
     ))]
     let params = params.with_retries(10);
@@ -898,7 +935,10 @@ fn tcp_keepalive() {
         feature = "all",
         not(any(windows, target_os = "haiku", target_os = "openbsd"))
     ))]
-    assert_eq!(socket.keepalive_time().unwrap(), Duration::from_secs(200));
+    assert_eq!(
+        socket.tcp_keepalive_time().unwrap(),
+        Duration::from_secs(200)
+    );
 
     #[cfg(all(
         feature = "all",
@@ -909,6 +949,7 @@ fn tcp_keepalive() {
             target_os = "fuchsia",
             target_os = "illumos",
             target_os = "ios",
+            target_os = "visionos",
             target_os = "linux",
             target_os = "macos",
             target_os = "wasi",
@@ -918,7 +959,7 @@ fn tcp_keepalive() {
         )
     ))]
     assert_eq!(
-        socket.keepalive_interval().unwrap(),
+        socket.tcp_keepalive_interval().unwrap(),
         Duration::from_secs(30)
     );
 
@@ -931,15 +972,17 @@ fn tcp_keepalive() {
             target_os = "fuchsia",
             target_os = "illumos",
             target_os = "ios",
+            target_os = "visionos",
             target_os = "linux",
             target_os = "macos",
             target_os = "wasi",
             target_os = "netbsd",
             target_os = "tvos",
             target_os = "watchos",
+            target_os = "windows",
         )
     ))]
-    assert_eq!(socket.keepalive_retries().unwrap(), 10);
+    assert_eq!(socket.tcp_keepalive_retries().unwrap(), 10);
 }
 
 #[cfg(all(feature = "all", any(target_os = "fuchsia", target_os = "linux")))]
@@ -959,7 +1002,7 @@ fn device() {
                 eprintln!("error binding to device (`{interface}`): {err}");
                 continue;
             } else {
-                panic!("unexpected error binding device: {}", err);
+                panic!("unexpected error binding device: {err}");
             }
         }
         assert_eq!(
@@ -980,9 +1023,12 @@ fn device() {
     feature = "all",
     any(
         target_os = "ios",
+        target_os = "visionos",
         target_os = "macos",
         target_os = "tvos",
         target_os = "watchos",
+        target_os = "solaris",
+        target_os = "illumos",
     )
 ))]
 #[test]
@@ -1007,7 +1053,7 @@ fn device() {
                 eprintln!("error binding to device (`{interface}`): {err}");
                 continue;
             } else {
-                panic!("unexpected error binding device: {}", err);
+                panic!("unexpected error binding device: {err}");
             }
         }
         assert_eq!(socket.device_index_v4().unwrap(), iface_index);
@@ -1025,9 +1071,12 @@ fn device() {
     feature = "all",
     any(
         target_os = "ios",
+        target_os = "visionos",
         target_os = "macos",
         target_os = "tvos",
         target_os = "watchos",
+        target_os = "solaris",
+        target_os = "illumos",
     )
 ))]
 #[test]
@@ -1052,7 +1101,7 @@ fn device_v6() {
                 eprintln!("error binding to device (`{interface}`): {err}");
                 continue;
             } else {
-                panic!("unexpected error binding device: {}", err);
+                panic!("unexpected error binding device: {err}");
             }
         }
         assert_eq!(socket.device_index_v6().unwrap(), iface_index);
@@ -1072,6 +1121,7 @@ fn device_v6() {
         target_os = "android",
         target_os = "freebsd",
         target_os = "ios",
+        target_os = "visionos",
         target_os = "linux",
         target_os = "macos",
         target_os = "tvos",
@@ -1233,10 +1283,12 @@ fn r#type() {
         unix,
         not(any(
             target_os = "ios",
+            target_os = "visionos",
             target_os = "macos",
             target_os = "tvos",
             target_os = "watchos",
             target_os = "vita",
+            target_os = "cygwin",
         )),
         feature = "all",
     ))]
@@ -1330,7 +1382,7 @@ const GET_BUF_SIZE: usize = SET_BUF_SIZE;
 #[cfg(target_os = "linux")]
 const GET_BUF_SIZE: usize = 2 * SET_BUF_SIZE;
 
-test!(nodelay, set_nodelay(true));
+test!(tcp_nodelay, set_tcp_nodelay(true));
 test!(
     recv_buffer_size,
     set_recv_buffer_size(SET_BUF_SIZE),
@@ -1346,22 +1398,31 @@ test!(out_of_band_inline, set_out_of_band_inline(true));
 test!(reuse_address, set_reuse_address(true));
 #[cfg(all(
     feature = "all",
-    not(any(windows, target_os = "solaris", target_os = "illumos"))
+    not(any(
+        windows,
+        target_os = "solaris",
+        target_os = "illumos",
+        target_os = "cygwin",
+    ))
 ))]
 test!(reuse_port, set_reuse_port(true));
 #[cfg(all(feature = "all", target_os = "freebsd"))]
 test!(reuse_port_lb, set_reuse_port_lb(true));
-#[cfg(all(feature = "all", unix, not(target_os = "redox")))]
+#[cfg(all(
+    feature = "all",
+    unix,
+    not(any(target_os = "redox", target_os = "cygwin")),
+))]
 test!(
     #[cfg_attr(target_os = "linux", ignore = "Different value returned")]
-    mss,
-    set_mss(256)
+    tcp_mss,
+    set_tcp_mss(256)
 );
 #[cfg(all(feature = "all", target_os = "linux"))]
 test!(
     #[ignore = "setting `IP_TRANSPARENT` requires the `CAP_NET_ADMIN` capability (works when running as root)"]
-    ip_transparent,
-    set_ip_transparent(true)
+    ip_transparent_v4,
+    set_ip_transparent_v4(true)
 );
 #[cfg(all(feature = "all", any(target_os = "fuchsia", target_os = "linux")))]
 test!(
@@ -1373,17 +1434,17 @@ test!(
     feature = "all",
     any(target_os = "android", target_os = "fuchsia", target_os = "linux")
 ))]
-test!(cork, set_cork(true));
+test!(tcp_cork, set_tcp_cork(true));
 #[cfg(all(
     feature = "all",
     any(target_os = "android", target_os = "fuchsia", target_os = "linux")
 ))]
-test!(quickack, set_quickack(false));
+test!(tcp_quickack, set_tcp_quickack(false));
 #[cfg(all(
     feature = "all",
     any(target_os = "android", target_os = "fuchsia", target_os = "linux")
 ))]
-test!(thin_linear_timeouts, set_thin_linear_timeouts(true));
+test!(tcp_thin_linear_timeouts, set_tcp_thin_linear_timeouts(true));
 test!(linger, set_linger(Some(Duration::from_secs(10))));
 test!(
     read_timeout,
@@ -1391,23 +1452,26 @@ test!(
 );
 test!(keepalive, set_keepalive(true));
 #[cfg(all(feature = "all", any(target_os = "fuchsia", target_os = "linux")))]
-test!(freebind, set_freebind(true));
+test!(freebind_v4, set_freebind_v4(true));
 #[cfg(all(feature = "all", target_os = "linux"))]
-test!(IPv6 freebind_ipv6, set_freebind_ipv6(true));
+test!(IPv6 freebind_v6, set_freebind_v6(true));
 
-test!(IPv4 ttl, set_ttl(40));
+test!(IPv4 ttl_v4, set_ttl_v4(40));
 
 #[cfg(not(any(
     target_os = "fuchsia",
     target_os = "redox",
     target_os = "solaris",
     target_os = "illumos",
+    target_os = "haiku",
+    target_os = "cygwin",
 )))]
-test!(IPv4 tos, set_tos(96));
+test!(IPv4 tos_v4, set_tos_v4(96));
 
 #[cfg(not(any(
     target_os = "dragonfly",
     target_os = "fuchsia",
+    target_os = "hurd",
     target_os = "illumos",
     target_os = "netbsd",
     target_os = "openbsd",
@@ -1415,10 +1479,12 @@ test!(IPv4 tos, set_tos(96));
     target_os = "solaris",
     target_os = "windows",
     target_os = "vita",
+    target_os = "haiku",
+    target_os = "cygwin",
 )))]
-test!(IPv4 recv_tos, set_recv_tos(true));
+test!(IPv4 recv_tos_v4, set_recv_tos_v4(true));
 
-#[cfg(not(windows))] // TODO: returns `WSAENOPROTOOPT` (10042) on Windows.
+#[cfg(not(any(windows, target_os = "cygwin")))] // TODO: returns `WSAENOPROTOOPT` (10042) on Windows.
 test!(IPv4 broadcast, set_broadcast(true));
 
 #[cfg(not(target_os = "vita"))]
@@ -1429,11 +1495,12 @@ test!(IPv6 unicast_hops_v6, set_unicast_hops_v6(20));
     target_os = "dragonfly",
     target_os = "freebsd",
     target_os = "openbsd",
-    target_os = "vita"
+    target_os = "vita",
+    target_os = "cygwin",
 )))]
 test!(IPv6 only_v6, set_only_v6(true));
 // IPv6 socket are already IPv6 only on FreeBSD and Windows.
-#[cfg(any(windows, target_os = "freebsd"))]
+#[cfg(any(windows, target_os = "freebsd", target_os = "cygwin"))]
 test!(IPv6 only_v6, set_only_v6(false));
 
 #[cfg(all(
@@ -1454,6 +1521,7 @@ test!(IPv6 tclass_v6, set_tclass_v6(96));
 #[cfg(not(any(
     target_os = "dragonfly",
     target_os = "fuchsia",
+    target_os = "hurd",
     target_os = "illumos",
     target_os = "netbsd",
     target_os = "openbsd",
@@ -1461,8 +1529,29 @@ test!(IPv6 tclass_v6, set_tclass_v6(96));
     target_os = "solaris",
     target_os = "windows",
     target_os = "vita",
+    target_os = "haiku",
+    target_os = "cygwin",
 )))]
 test!(IPv6 recv_tclass_v6, set_recv_tclass_v6(true));
+
+#[cfg(all(
+    feature = "all",
+    not(any(
+        target_os = "dragonfly",
+        target_os = "fuchsia",
+        target_os = "hurd",
+        target_os = "illumos",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "redox",
+        target_os = "solaris",
+        target_os = "windows",
+        target_os = "vita",
+        target_os = "haiku",
+        target_os = "cygwin",
+    ))
+))]
+test!(IPv6 recv_hoplimit_v6, set_recv_hoplimit_v6(true));
 
 #[cfg(all(
     feature = "all",
@@ -1473,6 +1562,11 @@ test!(
     set_tcp_user_timeout(Some(Duration::from_secs(10)))
 );
 
+#[cfg(all(feature = "all", target_os = "linux"))]
+test!(IPv4 multicast_all_v4, set_multicast_all_v4(false));
+#[cfg(all(feature = "all", target_os = "linux"))]
+test!(IPv6 multicast_all_v6, set_multicast_all_v6(false));
+
 #[test]
 #[cfg(not(any(
     target_os = "haiku",
@@ -1482,6 +1576,7 @@ test!(
     target_os = "redox",
     target_os = "solaris",
     target_os = "vita",
+    target_os = "cygwin",
 )))]
 fn join_leave_multicast_v4_n() {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).unwrap();
@@ -1507,6 +1602,7 @@ fn join_leave_multicast_v4_n() {
 #[cfg(not(any(
     target_os = "dragonfly",
     target_os = "haiku",
+    target_os = "hurd",
     target_os = "netbsd",
     target_os = "openbsd",
     target_os = "redox",
@@ -1531,19 +1627,82 @@ fn header_included() {
         Err(ref err) if err.kind() == io::ErrorKind::PermissionDenied => return,
         #[cfg(unix)]
         Err(ref err) if err.raw_os_error() == Some(libc::EPROTONOSUPPORT) => return,
-        Err(err) => panic!("unexpected error creating socket: {}", err),
+        Err(err) => panic!("unexpected error creating socket: {err}"),
     };
 
     let initial = socket
-        .header_included()
+        .header_included_v4()
         .expect("failed to get initial value");
     assert_eq!(initial, false, "initial value and argument are the same");
 
     socket
-        .set_header_included(true)
+        .set_header_included_v4(true)
         .expect("failed to set option");
-    let got = socket.header_included().expect("failed to get value");
+    let got = socket.header_included_v4().expect("failed to get value");
     assert_eq!(got, true, "set and get values differ");
+}
+
+#[test]
+#[cfg(all(
+    feature = "all",
+    not(any(
+        target_os = "redox",
+        target_os = "espidf",
+        target_os = "openbsd",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd"
+    ))
+))]
+fn header_included_ipv6() {
+    let socket = match Socket::new(Domain::IPV6, Type::RAW, None) {
+        Ok(socket) => socket,
+        // Need certain permissions to create a raw sockets.
+        Err(ref err) if err.kind() == io::ErrorKind::PermissionDenied => return,
+        #[cfg(unix)]
+        Err(ref err) if err.raw_os_error() == Some(libc::EPROTONOSUPPORT) => return,
+        Err(err) => panic!("unexpected error creating socket: {err}"),
+    };
+
+    let initial = socket
+        .header_included_v6()
+        .expect("failed to get initial value");
+    assert_eq!(initial, false, "initial value and argument are the same");
+
+    socket
+        .set_header_included_v6(true)
+        .expect("failed to set option");
+    let got = socket.header_included_v6().expect("failed to get value");
+    assert_eq!(got, true, "set and get values differ");
+}
+
+#[test]
+#[cfg(all(
+    feature = "all",
+    any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "windows"
+    )
+))]
+fn original_dst_v4() {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+    #[cfg(not(target_os = "windows"))]
+    let expected = Some(libc::ENOENT);
+    #[cfg(target_os = "windows")]
+    let expected = Some(windows_sys::Win32::Networking::WinSock::WSAEINVAL);
+
+    match socket.original_dst_v4() {
+        Ok(_) => panic!("original_dst_v4 on non-redirected socket should fail"),
+        Err(err) => assert_eq!(err.raw_os_error(), expected),
+    }
+
+    let socket = Socket::new(Domain::IPV6, Type::STREAM, None).unwrap();
+    match socket.original_dst_v4() {
+        Ok(_) => panic!("original_dst_v4 on non-redirected socket should fail"),
+        Err(err) => assert_eq!(err.raw_os_error(), expected),
+    }
 }
 
 #[test]
@@ -1551,34 +1710,26 @@ fn header_included() {
     feature = "all",
     any(target_os = "android", target_os = "fuchsia", target_os = "linux")
 ))]
-fn original_dst() {
-    let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
-    match socket.original_dst() {
-        Ok(_) => panic!("original_dst on non-redirected socket should fail"),
-        Err(err) => assert_eq!(err.raw_os_error(), Some(libc::ENOENT)),
-    }
-
+fn original_dst_v6() {
     let socket = Socket::new(Domain::IPV6, Type::STREAM, None).unwrap();
-    match socket.original_dst() {
-        Ok(_) => panic!("original_dst on non-redirected socket should fail"),
-        Err(err) => assert_eq!(err.raw_os_error(), Some(libc::ENOENT)),
-    }
-}
-
-#[test]
-#[cfg(all(feature = "all", any(target_os = "android", target_os = "linux")))]
-fn original_dst_ipv6() {
-    let socket = Socket::new(Domain::IPV6, Type::STREAM, None).unwrap();
-    match socket.original_dst_ipv6() {
-        Ok(_) => panic!("original_dst_ipv6 on non-redirected socket should fail"),
-        Err(err) => assert_eq!(err.raw_os_error(), Some(libc::ENOENT)),
+    #[cfg(not(target_os = "windows"))]
+    let expected = Some(libc::ENOENT);
+    #[cfg(target_os = "windows")]
+    let expected = Some(windows_sys::Win32::Networking::WinSock::WSAEINVAL);
+    #[cfg(not(target_os = "windows"))]
+    let expected_v4 = Some(libc::EOPNOTSUPP);
+    #[cfg(target_os = "windows")]
+    let expected_v4 = Some(windows_sys::Win32::Networking::WinSock::WSAEINVAL);
+    match socket.original_dst_v6() {
+        Ok(_) => panic!("original_dst_v6 on non-redirected socket should fail"),
+        Err(err) => assert_eq!(err.raw_os_error(), expected),
     }
 
     // Not supported on IPv4 socket.
     let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
-    match socket.original_dst_ipv6() {
-        Ok(_) => panic!("original_dst_ipv6 on non-redirected socket should fail"),
-        Err(err) => assert_eq!(err.raw_os_error(), Some(libc::EOPNOTSUPP)),
+    match socket.original_dst_v6() {
+        Ok(_) => panic!("original_dst_v6 on non-redirected socket should fail"),
+        Err(err) => assert_eq!(err.raw_os_error(), expected_v4),
     }
 }
 
@@ -1674,5 +1825,34 @@ fn cookie() {
     match second_socket_cookie {
         Ok(cookie) => assert_eq!(cookie, first_socket_cookie.unwrap()),
         Err(err) => panic!("Could not get socket cookie a second time, err: {err}"),
+    }
+}
+
+#[cfg(all(unix, target_os = "linux"))]
+#[test]
+fn set_passcred() {
+    let socket = Socket::new(Domain::UNIX, Type::DGRAM, None).unwrap();
+    assert!(!socket.passcred().unwrap());
+
+    socket.set_passcred(true).unwrap();
+    assert!(socket.passcred().unwrap());
+
+    let socket = Socket::new(Domain::UNIX, Type::STREAM, None).unwrap();
+    assert!(!socket.passcred().unwrap());
+
+    socket.set_passcred(true).unwrap();
+    assert!(socket.passcred().unwrap());
+}
+
+#[cfg(all(feature = "all", target_os = "linux"))]
+#[test]
+fn set_priority() {
+    let socket = Socket::new(Domain::UNIX, Type::DGRAM, None).unwrap();
+    assert!(socket.priority().unwrap() == 0);
+
+    // test priorities 6 .. 0; values above 6 require additional priviledges
+    for i in (0..=6).rev() {
+        socket.set_priority(i).unwrap();
+        assert!(socket.priority().unwrap() == i);
     }
 }
